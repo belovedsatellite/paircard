@@ -3,16 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SIDE A/B 카드 스튜디오</title>
-<meta name="description" content="SIDE A/B 카드 템플릿에 이미지와 글자를 넣어 PNG·GIF로 저장하는 도구">
+<!-- 보안: 이 사이트 파일과 Google Fonts 외에는 아무것도 불러오지 않도록 제한 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<title>페어 카드 스튜디오</title>
+<meta name="description" content="좌우 한 쌍의 카드 템플릿에 이미지와 글자를 넣어 PNG·GIF로 저장하는 도구">
+<script src="js/theme.js"></script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand">SIDE A/B 카드 스튜디오</div>
+    <div class="brand">페어 카드 스튜디오</div>
     <div id="saveStatus" class="save-status" title="입력 내용은 이 브라우저에 자동으로 임시 저장됩니다"></div>
     <div class="top-actions">
+      <button id="btnTheme" class="btn" title="다크 / 라이트 모드 전환"></button>
       <button id="btnTopPng" class="btn">PNG 저장</button>
       <button id="btnTopGif" class="btn primary">GIF 저장</button>
     </div>
@@ -25,7 +30,8 @@
 
   <main id="stage">
     <div id="previewWrap">
-      <canvas id="preview" width="1920" height="1080"></canvas>
+      <canvas id="preview" width="1920" height="1080" title="이미지를 끌어서 위치 조정 · 휠로 확대 · 더블클릭으로 초기화 · 파일을 끌어다 놓으면 그 자리에 넣기"></canvas>
+      <div class="preview-hint">이미지 끌기: 위치 · 휠: 확대 · 더블클릭: 초기화 · 파일 끌어다 놓기: 이미지 넣기</div>
     </div>
     <section id="timeline"></section>
   </main>

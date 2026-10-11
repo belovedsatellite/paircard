@@ -41,6 +41,7 @@
   }
 
   /* ───────── 기본값 ───────── */
+  var APP_ID = 'pair-card-studio', OLD_APP_ID = 'side-ab-card-studio', DEFAULT_FILE = 'pair-card';
   var DEFAULT_STYLE = {
     textMode: 'below',       // below: 이미지 아래 글자 / overlay: 이미지 위 글자
     cardW: 580, cardH: 780, gap: 150, offsetY: 0, radius: 32,
@@ -59,7 +60,7 @@
       id: uid(), type: 'gradient', gradType: 'linear', color: '#27304f', color2: '#8566c9', angle: 135,
       img: null, blur: 24, px: 50, py: 50, zoom: 100,
       dim: 0, dimColor: '#000000',
-      bigText: 'SIDE', bigSize: 440, bigWeight: 900, bigColor: '#ffffff', bigOpacity: 10, bigY: 50, bigSpacing: 0
+      bigText: 'SIDE', bigFont: 'Pretendard', bigSize: 440, bigWeight: 900, bigColor: '#ffffff', bigOpacity: 10, bigY: 50, bigSpacing: 0
     };
   }
   function newScene() { return { id: uid(), a: null, b: null, bg: null, hold: 1800, fx: 'flipX', dur: 700, stagger: 0 }; }
@@ -70,34 +71,91 @@
       b: [newCard('b', 1), newCard('b', 2)],
       bgs: [newBg()], scenes: [],
       style: Object.assign({}, DEFAULT_STYLE),
-      fonts: { title: 'Pretendard', body: 'Pretendard', big: 'Pretendard', google: [] },
-      exp: { pngScale: 1, gifW: 960, fps: 20, loop: true, dither: true },
+      fonts: { title: 'Pretendard', body: 'Pretendard', google: [] },
+      exp: { pngScale: 1, gifW: 960, fps: 20, loop: true, dither: true, fileName: DEFAULT_FILE, addStamp: true },
       assets: {}
     };
     return s;
   }
 
-  /* 저장 파일·임시 저장에서 읽은 내용을 안전한 형태로 맞춘다 */
+  /* ───────── 불러온 값 검사 ─────────
+   * 작업 파일·임시 저장은 남이 만든 파일일 수도 있으므로, 숫자 범위·색·글자 길이·이미지 형식을
+   * 하나하나 확인해서 안전한 값만 받아들인다. */
+  var LIMITS = {
+    cardW: [300, 860], cardH: [300, 1000], gap: [0, 700], offsetY: [-200, 200], radius: [0, 120], shadow: [0, 100],
+    imgRatio: [20, 100], imgInset: [0, 60], pad: [10, 100], titleSize: [16, 120], titleWeight: [100, 900],
+    textSize: [12, 80], textWeight: [100, 900], centerSize: [20, 300], centerWeight: [100, 900],
+    px: [0, 100], py: [0, 100], zoom: [100, 300], angle: [0, 360], blur: [0, 80], dim: [0, 100],
+    bigSize: [40, 900], bigWeight: [100, 900], bigOpacity: [0, 100], bigY: [0, 100], bigSpacing: [-40, 200],
+    hold: [0, 30000], dur: [100, 5000], stagger: [-3000, 3000]
+  };
+  var ENUMS = {
+    textMode: ['below', 'overlay'], align: ['left', 'center'], type: ['solid', 'gradient', 'image'], gradType: ['linear', 'radial'],
+    fx: CS.EFFECTS.map(function (f) { return f.id; })
+  };
+  var TEXT_MAX = { title: 200, text: 1000, bigText: 300, centerText: 50, fileName: 80 };
+  var COLOR_RE = /^#[0-9a-f]{6}$/i;
+  var ASSET_RE = /^data:image\/(png|jpeg|webp|gif|bmp|avif);base64,[A-Za-z0-9+/]+=*$/;
+  var ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+  function validFontName(n) { return typeof n === 'string' && /^[A-Za-z0-9][A-Za-z0-9 ]{0,59}$/.test(n); }
+  function cleanFileName(v) {
+    return String(v == null ? '' : v).replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '').replace(/^[.\s]+|[.\s]+$/g, '').slice(0, 80);
+  }
+  function clean(def, src) {
+    src = src && typeof src === 'object' ? src : {};
+    var out = {};
+    Object.keys(def).forEach(function (k) {
+      var d = def[k], v = src[k];
+      if (typeof d === 'number') {
+        v = Number(v);
+        if (!isFinite(v)) v = d;
+        out[k] = LIMITS[k] ? clamp(v, LIMITS[k][0], LIMITS[k][1]) : v;
+      } else if (typeof d === 'boolean') {
+        out[k] = typeof v === 'boolean' ? v : d;
+      } else if (typeof d === 'string') {
+        if (typeof v !== 'string') out[k] = d;
+        else if (ENUMS[k]) out[k] = ENUMS[k].indexOf(v) >= 0 ? v : d;
+        else if (COLOR_RE.test(d)) out[k] = COLOR_RE.test(v) ? v.toLowerCase() : d;
+        else out[k] = v.slice(0, TEXT_MAX[k] || 100);
+      } else {
+        out[k] = typeof v === 'string' ? v.slice(0, 40) : null; // 다른 항목을 가리키는 id (없으면 null)
+      }
+    });
+    if ('id' in def) out.id = typeof src.id === 'string' && ID_RE.test(src.id) ? src.id : def.id;
+    return out;
+  }
   function migrate(s) {
     var d = defaultState();
     if (!s || typeof s !== 'object') return d;
     var out = { v: 1 };
     out.mode = ['sync', 'alt', 'manual'].indexOf(s.mode) >= 0 ? s.mode : 'sync';
-    out.style = Object.assign({}, d.style, s.style);
-    out.fonts = Object.assign({}, d.fonts, s.fonts);
-    out.fonts.google = Array.isArray(out.fonts.google) ? out.fonts.google.filter(function (x) { return typeof x === 'string'; }) : [];
-    out.exp = Object.assign({}, d.exp, s.exp);
     out.assets = {};
     if (s.assets && typeof s.assets === 'object') Object.keys(s.assets).forEach(function (k) {
-      if (typeof s.assets[k] === 'string' && /^data:image\//.test(s.assets[k])) out.assets[k] = s.assets[k];
+      if (ID_RE.test(k) && typeof s.assets[k] === 'string' && ASSET_RE.test(s.assets[k])) out.assets[k] = s.assets[k];
     });
+    var imgRef = function (v) { return typeof v === 'string' && out.assets[v] ? v : null; };
+    var fonts = s.fonts && typeof s.fonts === 'object' ? s.fonts : {};
+    var google = (Array.isArray(fonts.google) ? fonts.google : []).filter(validFontName).slice(0, 30);
+    var fontOk = function (n) { return n === 'Pretendard' || google.indexOf(n) >= 0 ? n : 'Pretendard'; };
+    out.fonts = { title: fontOk(fonts.title), body: fontOk(fonts.body), google: google };
+    out.style = clean(DEFAULT_STYLE, s.style);
+    out.exp = clean(d.exp, s.exp);
+    if ([640, 960, 1280, 1920].indexOf(out.exp.gifW) < 0) out.exp.gifW = 960;
+    if ([10, 16, 20, 25, 33].indexOf(out.exp.fps) < 0) out.exp.fps = 20;
+    if ([0.5, 1, 2].indexOf(out.exp.pngScale) < 0) out.exp.pngScale = 1;
+    out.exp.fileName = cleanFileName(out.exp.fileName) || DEFAULT_FILE;
     ['a', 'b'].forEach(function (side) {
-      var list = Array.isArray(s[side]) ? s[side] : [];
-      out[side] = list.map(function (c, i) { return Object.assign(newCard(side, i + 1), c); });
+      var list = Array.isArray(s[side]) ? s[side].slice(0, 300) : [];
+      out[side] = list.map(function (c, i) { var o = clean(newCard(side, i + 1), c); o.img = imgRef(c && c.img); return o; });
       if (!out[side].length) out[side] = [newCard(side, 1)];
     });
-    out.bgs = (Array.isArray(s.bgs) && s.bgs.length ? s.bgs : d.bgs).map(function (b) { return Object.assign(newBg(), b); });
-    out.scenes = (Array.isArray(s.scenes) ? s.scenes : []).map(function (x) { return Object.assign(newScene(), x); });
+    out.bgs = (Array.isArray(s.bgs) && s.bgs.length ? s.bgs.slice(0, 50) : d.bgs).map(function (b) {
+      var o = clean(newBg(), b);
+      o.img = imgRef(b && b.img);
+      o.bigFont = fontOk(b && b.bigFont ? b.bigFont : fonts.big); // 예전 파일은 전체 공통 큰 글자 폰트를 썼다
+      return o;
+    });
+    out.scenes = (Array.isArray(s.scenes) ? s.scenes.slice(0, 600) : []).map(function (x) { return clean(newScene(), x); });
     return out;
   }
 
@@ -184,10 +242,11 @@
   function field(label, control, cls) { return h('div', { class: 'field' + (cls ? ' ' + cls : '') }, h('label', { text: label }), control); }
   function fRange(label, obj, key, min, max, step, o) {
     o = o || {};
-    var val = h('span', { class: 'val', text: obj[key] + (o.unit || '') });
+    var show = function () { return Math.round(obj[key]) + (o.unit || ''); };
+    var val = h('span', { class: 'val', text: show() });
     var inp = h('input', {
       type: 'range', min: min, max: max, step: step || 1, value: obj[key],
-      oninput: function () { obj[key] = +inp.value; val.textContent = obj[key] + (o.unit || ''); touch(o.touch); }
+      oninput: function () { obj[key] = +inp.value; val.textContent = show(); touch(o.touch); }
     });
     return field(label, h('div', { class: 'row' }, inp, val));
   }
@@ -217,7 +276,7 @@
     return field(label, sel);
   }
   function fCheck(label, obj, key, o) {
-    var inp = h('input', { type: 'checkbox', checked: !!obj[key], onchange: function () { obj[key] = inp.checked; touch(o && o.touch); } });
+    var inp = h('input', { type: 'checkbox', checked: !!obj[key], onchange: function () { obj[key] = inp.checked; if (o && o.onchange) o.onchange(inp.checked); touch(o && o.touch); } });
     return h('label', { class: 'field', style: { gridTemplateColumns: '18px 1fr', cursor: 'pointer' } }, inp, h('span', { text: label }));
   }
   function section(title) {
@@ -234,20 +293,23 @@
     fp.onchange = function () { if (fp.files && fp.files.length) cb(Array.from(fp.files)); };
     fp.click();
   }
+  var MAX_FILE_BYTES = 40 * 1048576, MAX_PIXELS = 80e6, MAX_SIDE = 2400;
   function readImageFile(file) {
     return new Promise(function (res, rej) {
       if (!/^image\//.test(file.type)) { rej(new Error('이미지 파일만 넣을 수 있습니다.')); return; }
+      if (file.size > MAX_FILE_BYTES) { rej(new Error('이미지 파일이 너무 큽니다. (40MB 이하만 넣을 수 있습니다)')); return; }
       var fr = new FileReader();
       fr.onerror = function () { rej(new Error('파일을 읽지 못했습니다.')); };
       fr.onload = function () {
         var url = fr.result, img = new Image();
         img.onerror = function () { rej(new Error('이 브라우저에서 열 수 없는 이미지입니다.')); };
         img.onload = function () {
-          var w = img.naturalWidth, hh = img.naturalHeight, MAX = 2400;
-          var isGif = file.type === 'image/gif';
-          if (!w || !hh || (Math.max(w, hh) <= MAX && !isGif)) { res(url); return; }
-          // 너무 큰 이미지는 줄이고, 움직이는 GIF는 첫 장면만 남긴다
-          var k = Math.min(1, MAX / Math.max(w, hh));
+          var w = img.naturalWidth || 1600, hh = img.naturalHeight || 1600;
+          if (w * hh > MAX_PIXELS) { rej(new Error('이미지 해상도가 너무 큽니다. (8000만 화소 이하만 넣을 수 있습니다)')); return; }
+          // PNG·JPEG·WebP이면서 적당한 크기면 원본 그대로 쓴다.
+          // 그 밖의 형식(GIF·SVG·BMP 등)과 너무 큰 이미지는 그림으로 다시 그려 저장한다 (움직이는 GIF는 첫 장면만 남음)
+          if (/^image\/(png|jpeg|webp)$/.test(file.type) && Math.max(w, hh) <= MAX_SIDE && ASSET_RE.test(url)) { res(url); return; }
+          var k = Math.min(1, MAX_SIDE / Math.max(w, hh));
           var c = CS.makeCanvas(w * k, hh * k);
           c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
           res(file.type === 'image/jpeg' ? c.toDataURL('image/jpeg', 0.92) : c.toDataURL('image/png'));
@@ -321,7 +383,7 @@
   }
   function panelCards(side) {
     var list = S[side], SIDE = side.toUpperCase(), out = [];
-    out.push(h('p', { class: 'hint', text: 'SIDE ' + SIDE + ' 카드입니다. 위에서부터 차례로 넘어갑니다.' }));
+    out.push(h('p', { class: 'hint', text: 'SIDE ' + SIDE + ' 카드입니다. 위에서부터 차례로 넘어갑니다. 이미지 위치와 확대는 미리보기에서 이미지를 끌거나 마우스 휠을 굴려서도 바꿀 수 있습니다.' }));
     list.forEach(function (card, i) {
       var open = ui.open[side] === card.id;
       var nameEl = h('span', { class: 'name', text: card.title || '(제목 없음)' });
@@ -429,6 +491,8 @@
         if (bg.dim > 0 || bg.type === 'image') kids.push(fColor('덮는 색', bg, 'dimColor'));
         kids.push(h('h3', { text: '배경 큰 글자', style: { margin: '14px 0 8px', fontSize: '12px', color: 'var(--muted)' } }));
         kids.push(fText('내용', bg, 'bigText', { multiline: true, rows: 2, placeholder: '비워 두면 표시하지 않습니다' }));
+        kids.push(fSelect('폰트', bg, 'bigFont', fontOptions()));
+        kids.push(googleFontAdder(function (name) { bg.bigFont = name; }));
         kids.push(fRange('크기', bg, 'bigSize', 40, 900, 2));
         kids.push(fRange('불투명도', bg, 'bigOpacity', 0, 100, 1, { unit: '%' }));
         kids.push(fColor('색', bg, 'bigColor'));
@@ -472,39 +536,48 @@
   function fontOptions() {
     return [['Pretendard', 'Pretendard (기본)']].concat(S.fonts.google.map(function (n) { return [n, n]; }));
   }
-  function panelStyle() {
-    var st = S.style, f = S.fonts;
-    var gfInput = h('input', { type: 'text', placeholder: '예: Noto Serif KR', list: 'gfList' });
+  /* Google Fonts 추가 칸. 추가에 성공하면 onAdded(폰트 이름)를 부른다 */
+  function googleFontAdder(onAdded) {
+    var f = S.fonts;
+    var gfInput = h('input', { type: 'text', placeholder: '예: Black Han Sans', list: 'gfList', maxLength: 60 });
     function addGF() {
       var name = gfInput.value.trim().replace(/\s+/g, ' ');
       if (!name) return;
-      if (f.google.indexOf(name) >= 0) { toast('이미 추가된 폰트입니다.'); return; }
+      if (!validFontName(name)) { toast('폰트 이름은 영문·숫자·띄어쓰기로만 입력해 주세요. (예: Noto Serif KR)', 4500); return; }
+      if (f.google.indexOf(name) >= 0) { if (onAdded) { onAdded(name); touch({ panel: true }); } toast('이미 추가된 폰트라 바로 적용했습니다.'); return; }
       toast('"' + name + '" 폰트를 불러오는 중…');
       loadGoogleFont(name).then(function (ok) {
         if (!ok) { toast('폰트를 불러오지 못했습니다. 인터넷 연결과 폰트 이름(영문 표기)을 확인해 주세요.', 5000); return; }
-        f.google.push(name); toast('"' + name + '" 폰트를 추가했습니다. 위 목록에서 골라 적용하세요.');
+        f.google.push(name);
+        if (onAdded) onAdded(name);
+        toast('"' + name + '" 폰트를 추가' + (onAdded ? '해서 적용했습니다.' : '했습니다. 위 목록에서 골라 적용하세요.'));
         touch({ panel: true });
       });
     }
+    gfInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') addGF(); });
+    return h('div', { class: 'field stack' }, h('label', { text: 'Google Fonts 추가 (인터넷 연결 필요)' }),
+      h('div', { class: 'row' }, gfInput, h('button', { class: 'btn', text: '추가', onclick: addGF })),
+      h('datalist', { id: 'gfList' }, GOOGLE_SUGGEST.map(function (n) { return h('option', { value: n }); })));
+  }
+  function panelStyle() {
+    var st = S.style, f = S.fonts;
     return [
       section('폰트',
         fSelect('카드 제목', f, 'title', fontOptions()),
         fSelect('카드 문구', f, 'body', fontOptions()),
-        fSelect('배경 큰 글자', f, 'big', fontOptions()),
-        h('div', { class: 'field stack' }, h('label', { text: 'Google Fonts 추가 (인터넷 연결 필요)' }),
-          h('div', { class: 'row' }, gfInput, h('button', { class: 'btn', text: '추가', onclick: addGF })),
-          h('datalist', { id: 'gfList' }, GOOGLE_SUGGEST.map(function (n) { return h('option', { value: n }); }))),
+        googleFontAdder(null),
         f.google.length ? h('div', { class: 'btn-row' }, f.google.map(function (n) {
           return h('button', {
             class: 'btn small danger', text: n + ' ✕', title: '목록에서 빼기',
             onclick: function () {
               f.google = f.google.filter(function (x) { return x !== n; });
-              ['title', 'body', 'big'].forEach(function (k) { if (f[k] === n) f[k] = 'Pretendard'; });
+              ['title', 'body'].forEach(function (k) { if (f[k] === n) f[k] = 'Pretendard'; });
+              S.bgs.forEach(function (bg) { if (bg.bigFont === n) bg.bigFont = 'Pretendard'; });
               touch({ panel: true });
             }
           });
         })) : null,
-        h('p', { class: 'hint', text: 'Google Fonts에 등록된 영문 이름을 그대로 입력합니다. 불러오지 못하면 Pretendard로 표시됩니다.' })
+        h('p', { class: 'hint', text: 'Google Fonts에 등록된 영문 이름을 그대로 입력합니다. 불러오지 못하면 Pretendard로 표시됩니다. 배경 큰 글자의 폰트는 배경 탭에서 배경마다 따로 고릅니다.' })
       ),
       section('카드',
         fSelect('글자 배치', st, 'textMode', [['below', '이미지 아래'], ['overlay', '이미지 위에 겹치기']], {
@@ -558,7 +631,15 @@
     function upd() { sum.textContent = gifSummary(); }
     var wSel = fSelect('가로 크기', e, 'gifW', [[640, '640×360 (가볍게)'], [960, '960×540 (권장)'], [1280, '1280×720'], [1920, '1920×1080 (용량 큼)']], { num: true, onchange: upd });
     var fSel = fSelect('부드러움', e, 'fps', [[10, '초당 10장 (가볍게)'], [16, '초당 약 16장'], [20, '초당 20장 (권장)'], [25, '초당 25장'], [33, '초당 약 33장 (용량 큼)']], { num: true, onchange: upd });
+    var nameHint = h('p', { class: 'hint' });
+    function updName() { nameHint.textContent = '저장 예: ' + outName('png') + ' · ' + outName('gif'); }
+    updName();
     return [
+      section('파일 이름',
+        fText('이름', e, 'fileName', { placeholder: DEFAULT_FILE, oninput: updName }),
+        fCheck('이름 뒤에 날짜·시간 붙이기 (같은 이름 겹침 방지)', e, 'addStamp', { onchange: updName }),
+        nameHint
+      ),
       section('PNG (정지 이미지)',
         fSelect('크기', e, 'pngScale', [[0.5, '960×540'], [1, '1920×1080 (기본)'], [2, '3840×2160']], { num: true }),
         h('div', { class: 'btn-row' },
@@ -828,6 +909,11 @@
   }
 
   /* ───────── 내보내기 ───────── */
+  /* 저장할 파일 이름: 사용자가 정한 이름 + (선택) 날짜·시간 + 확장자 */
+  function outName(ext, suffix) {
+    var base = cleanFileName(S.exp.fileName) || DEFAULT_FILE;
+    return base + (suffix ? '-' + suffix : '') + (S.exp.addStamp ? '-' + stamp() : '') + '.' + ext;
+  }
   function prepare() {
     return CS.loadAssets(S.assets).then(function () { return CS.ensureFonts(S); });
   }
@@ -838,7 +924,7 @@
   function doPng() {
     stopPlay();
     prepare().then(function () { return CS.exportPNG(S, currentFrame(), S.exp.pngScale); })
-      .then(function (blob) { CS.downloadBlob(blob, 'side-ab-' + stamp() + '.png'); toast('PNG를 저장했습니다. (' + fmtSize(blob.size) + ')'); })
+      .then(function (blob) { CS.downloadBlob(blob, outName('png')); toast('PNG를 저장했습니다. (' + fmtSize(blob.size) + ')'); })
       .catch(function (e) { toast('PNG 저장에 실패했습니다: ' + e.message, 5000); });
   }
   function showOverlay(title) {
@@ -850,9 +936,9 @@
     showOverlay('모든 장면을 PNG로 만드는 중');
     $('overlayCancel').hidden = true;
     prepare().then(function () {
-      return CS.exportAllPNG(S, S.exp.pngScale, function (i, n) { $('overlayBar').style.width = (i / n * 100) + '%'; $('overlayText').textContent = i + ' / ' + n + ' 장면'; });
+      return CS.exportAllPNG(S, S.exp.pngScale, cleanFileName(S.exp.fileName) || DEFAULT_FILE, function (i, n) { $('overlayBar').style.width = (i / n * 100) + '%'; $('overlayText').textContent = i + ' / ' + n + ' 장면'; });
     }).then(function (blob) {
-      CS.downloadBlob(blob, 'side-ab-scenes-' + stamp() + '.zip'); toast('장면 ' + S.scenes.length + '장을 ZIP으로 저장했습니다. (' + fmtSize(blob.size) + ')');
+      CS.downloadBlob(blob, outName('zip', 'scenes')); toast('장면 ' + S.scenes.length + '장을 ZIP으로 저장했습니다. (' + fmtSize(blob.size) + ')');
     }).catch(function (e) { toast('저장에 실패했습니다: ' + e.message, 5000); })
       .then(function () { $('overlay').hidden = true; $('overlayCancel').hidden = false; });
   }
@@ -869,7 +955,7 @@
         function () { return cancelled; });
     }).then(function (blob) {
       if (!blob) { toast('GIF 만들기를 취소했습니다.'); return; }
-      CS.downloadBlob(blob, 'side-ab-' + stamp() + '.gif');
+      CS.downloadBlob(blob, outName('gif'));
       toast('GIF를 저장했습니다. (' + fmtSize(blob.size) + ', ' + ((Date.now() - t0) / 1000).toFixed(1) + '초 걸림)' +
         (blob.size > 15 * 1048576 ? ' X 업로드 제한(15MB)을 넘으니 가로 크기나 부드러움을 낮춰 보세요.' : ''), 6000);
     }).catch(function (e) { toast('GIF 저장에 실패했습니다: ' + e.message, 6000); })
@@ -879,8 +965,8 @@
   /* ───────── 작업 파일 ───────── */
   function saveProject() {
     gcAssets();
-    var blob = new Blob([JSON.stringify({ app: 'side-ab-card-studio', version: 1, savedAt: new Date().toISOString(), state: S })], { type: 'application/json' });
-    CS.downloadBlob(blob, 'side-ab-project-' + stamp() + '.json');
+    var blob = new Blob([JSON.stringify({ app: APP_ID, version: 1, savedAt: new Date().toISOString(), state: S })], { type: 'application/json' });
+    CS.downloadBlob(blob, outName('json', 'project'));
     toast('작업 파일을 저장했습니다. (' + fmtSize(blob.size) + ')');
   }
   function applyState(next) {
@@ -896,9 +982,11 @@
   }
   function loadProject() {
     pickFiles('.json,application/json', false, function (files) {
-      files[0].text().then(function (txt) {
+      var file = files[0];
+      if (file.size > 300 * 1048576) { toast('작업 파일이 너무 큽니다. (300MB 이하)', 5000); return; }
+      file.text().then(function (txt) {
         var obj = JSON.parse(txt);
-        if (!obj || obj.app !== 'side-ab-card-studio' || !obj.state) throw new Error('이 도구의 작업 파일이 아닙니다.');
+        if (!obj || (obj.app !== APP_ID && obj.app !== OLD_APP_ID) || !obj.state) throw new Error('이 도구의 작업 파일이 아닙니다.');
         return applyState(obj.state);
       }).then(function () { toast('작업 파일을 불러왔습니다.'); scheduleSave(); })
         .catch(function (e) { toast('불러오지 못했습니다: ' + (e instanceof SyntaxError ? '파일 형식이 올바르지 않습니다.' : e.message), 5000); });
@@ -966,10 +1054,163 @@
     });
   }
 
+  /* ───────── 미리보기에서 이미지 직접 조정 ─────────
+   * 카드 이미지·배경 이미지를 끌면 위치, 휠을 굴리면 확대(커서 위치 기준), 더블클릭하면 처음 상태로.
+   * 빈 카드 이미지 자리를 누르면 이미지 고르기, 파일을 끌어다 놓으면 그 자리에 바로 넣기. */
+  var drag = null, wheelTimer = 0;
+  function canvasPoint(e) {
+    var r = pcanvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * CS.W / r.width, y: (e.clientY - r.top) * CS.H / r.height };
+  }
+  function inside(pt, A) { return pt.x >= A.x && pt.x <= A.x + A.w && pt.y >= A.y && pt.y <= A.y + A.h; }
+  function hitTarget(pt) {
+    var sc = S.scenes[ui.sel];
+    if (!sc) return null;
+    var R = CS.cardRects(S), sides = ['a', 'b'];
+    for (var i = 0; i < 2; i++) {
+      var side = sides[i], card = CS.findCard(S, side, sc[side]);
+      if (!card) continue;
+      var A = CS.cardImageArea(S, side);
+      if (A.w > 0 && A.h > 0 && inside(pt, A)) {
+        var img = CS.getImg(card.img);
+        return img ? { kind: 'card', side: side, obj: card, area: A, img: img } : { kind: 'card-empty', side: side, obj: card };
+      }
+      if (inside(pt, R[side])) return { kind: 'card-text', side: side, obj: card };
+    }
+    var bg = CS.findBg(S, sc.bg), bimg = bg && bg.type === 'image' ? CS.getImg(bg.img) : null;
+    if (bimg) return { kind: 'bg', obj: bg, area: { x: 0, y: 0, w: CS.W, h: CS.H }, img: bimg };
+    return { kind: 'bg-plain', obj: bg };
+  }
+  function focusItem(hit) {
+    if (!hit || !hit.obj) return;
+    if (hit.side) { ui.tab = hit.side; ui.open[hit.side] = hit.obj.id; }
+    else { ui.tab = 'bg'; ui.openBg = hit.obj.id; }
+    renderTabs(); renderPanel();
+    var el = $('panel').querySelector('.item.open');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }
+  function toStill() {
+    // 재생 중이거나 전환 도중이면 선택된 장면의 정지 화면으로 맞춘 다음 조정한다
+    var fr = ui.tl ? CS.frameAt(ui.tl, ui.t) : null;
+    if (ui.playing || (fr && fr.from != null)) selectScene(ui.sel);
+  }
+  function r1(v) { return Math.round(v * 10) / 10; }
+  function initPreviewEditing() {
+    pcanvas.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      toStill();
+      var pt = canvasPoint(e), hit = hitTarget(pt);
+      if (!hit) return;
+      drag = { hit: hit, start: pt, px: hit.obj.px, py: hit.obj.py, moved: false };
+      if (hit.img) { e.preventDefault(); pcanvas.setPointerCapture(e.pointerId); pcanvas.style.cursor = 'grabbing'; }
+    });
+    pcanvas.addEventListener('pointermove', function (e) {
+      var pt = canvasPoint(e);
+      if (!drag) {
+        if (ui.playing) { pcanvas.style.cursor = ''; return; }
+        var hv = hitTarget(pt);
+        pcanvas.style.cursor = hv && hv.img ? 'grab' : hv && hv.kind.indexOf('card') === 0 ? 'pointer' : '';
+        return;
+      }
+      if (!drag.hit.img) return;
+      var dx = pt.x - drag.start.x, dy = pt.y - drag.start.y;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      drag.moved = true;
+      var o = drag.hit.obj, A = drag.hit.area, g = CS.coverGeom(drag.hit.img, A.w, A.h, o.zoom);
+      if (!g) return;
+      // 이미지가 커서를 그대로 따라오도록, 움직인 거리를 원본 이미지 기준으로 바꿔 위치값(0~100)에 반영
+      var slackX = g.iw - g.sw, slackY = g.ih - g.sh;
+      if (slackX > 0.5) o.px = r1(clamp(drag.px - dx * (g.sw / A.w) / slackX * 100, 0, 100));
+      if (slackY > 0.5) o.py = r1(clamp(drag.py - dy * (g.sh / A.h) / slackY * 100, 0, 100));
+      touch();
+    });
+    function endDrag(e) {
+      if (!drag) return;
+      var d = drag; drag = null;
+      pcanvas.style.cursor = d.hit.img ? 'grab' : '';
+      if (e.type === 'pointercancel') return;
+      if (!d.moved && d.hit.kind === 'card-empty') {
+        pickFiles('image/*', false, function (fs) { setImage(d.hit.obj, fs[0]).then(function () { focusItem(d.hit); }); });
+        return;
+      }
+      if (d.hit.kind === 'bg-plain' && !d.moved) return;
+      if (d.moved || d.hit.kind.indexOf('card') === 0) focusItem(d.hit);
+    }
+    pcanvas.addEventListener('pointerup', endDrag);
+    pcanvas.addEventListener('pointercancel', endDrag);
+    pcanvas.addEventListener('lostpointercapture', function () { if (drag && drag.moved) { var d = drag; drag = null; focusItem(d.hit); } });
+
+    pcanvas.addEventListener('wheel', function (e) {
+      toStill();
+      var pt = canvasPoint(e), hit = hitTarget(pt);
+      if (!hit || !hit.img) return;
+      e.preventDefault();
+      var o = hit.obj, A = hit.area, img = hit.img;
+      var dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+      var z0 = o.zoom, z1 = clamp(z0 * Math.exp(-dy * 0.0015), 100, 300);
+      if (Math.abs(z1 - z0) < 0.05) return;
+      // 커서 아래의 지점이 제자리에 머물도록 위치값도 함께 고친다
+      var g0 = CS.coverGeom(img, A.w, A.h, z0), g1 = CS.coverGeom(img, A.w, A.h, z1);
+      if (!g0 || !g1) return;
+      var u = clamp((pt.x - A.x) / A.w, 0, 1), v = clamp((pt.y - A.y) / A.h, 0, 1);
+      var srcX = (g0.iw - g0.sw) * o.px / 100 + u * g0.sw, srcY = (g0.ih - g0.sh) * o.py / 100 + v * g0.sh;
+      var slx = g1.iw - g1.sw, sly = g1.ih - g1.sh;
+      o.zoom = r1(z1);
+      if (slx > 0.5) o.px = r1(clamp((srcX - u * g1.sw) / slx * 100, 0, 100));
+      if (sly > 0.5) o.py = r1(clamp((srcY - v * g1.sh) / sly * 100, 0, 100));
+      touch();
+      clearTimeout(wheelTimer); wheelTimer = setTimeout(function () { focusItem(hit); }, 350);
+    }, { passive: false });
+
+    pcanvas.addEventListener('dblclick', function (e) {
+      var hit = hitTarget(canvasPoint(e));
+      if (!hit || !hit.img) return;
+      hit.obj.px = 50; hit.obj.py = 50; hit.obj.zoom = 100;
+      touch(); focusItem(hit);
+      toast('이미지 위치와 확대를 처음 상태로 되돌렸습니다.');
+    });
+
+    pcanvas.addEventListener('dragover', function (e) { e.preventDefault(); });
+    pcanvas.addEventListener('drop', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      toStill();
+      var hit = hitTarget(canvasPoint(e));
+      if (!hit || !hit.obj) return;
+      if (hit.kind === 'bg' || hit.kind === 'bg-plain') hit.obj.type = 'image';
+      setImage(hit.obj, f).then(function () { focusItem(hit); });
+    });
+  }
+
+  /* ───────── 다크 / 라이트 모드 ───────── */
+  var THEME_KEY = 'pair-card-studio:theme';
+  function systemTheme() { return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; }
+  function currentTheme() { return document.documentElement.getAttribute('data-theme') || systemTheme(); }
+  function updateThemeButton() {
+    var b = $('btnTheme');
+    if (b) b.textContent = currentTheme() === 'dark' ? '☀ 라이트 모드' : '☾ 다크 모드';
+  }
+  function initTheme() {
+    $('btnTheme').onclick = function () {
+      var next = currentTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* 저장 못 해도 이번 화면에는 적용됨 */ }
+      updateThemeButton();
+    };
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(prefers-color-scheme: light)');
+      if (mq.addEventListener) mq.addEventListener('change', updateThemeButton);
+    }
+    updateThemeButton();
+  }
+
   /* ───────── 시작 ───────── */
   function init() {
     pcanvas = $('preview'); pctx = pcanvas.getContext('2d');
     initTimeline();
+    initPreviewEditing();
+    initTheme();
     $('btnTopPng').onclick = doPng;
     $('btnTopGif').onclick = doGif;
     document.addEventListener('keydown', function (e) {

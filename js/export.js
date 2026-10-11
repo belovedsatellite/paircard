@@ -23,11 +23,11 @@
     return canvasToBlob(CS.renderToCanvas(S, frame, scale));
   };
 
-  CS.exportAllPNG = async function (S, scale, onProgress) {
+  CS.exportAllPNG = async function (S, scale, base, onProgress) {
     var files = [];
     for (var i = 0; i < S.scenes.length; i++) {
       var blob = await CS.exportPNG(S, { from: null, to: i, ms: 0 }, scale);
-      files.push({ name: 'scene-' + String(i + 1).padStart(2, '0') + '.png', data: new Uint8Array(await blob.arrayBuffer()) });
+      files.push({ name: (base || 'scene') + '-' + String(i + 1).padStart(2, '0') + '.png', data: new Uint8Array(await blob.arrayBuffer()) });
       if (onProgress) onProgress(i + 1, S.scenes.length);
       await tick();
     }

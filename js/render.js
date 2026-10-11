@@ -60,7 +60,7 @@ window.CS = window.CS || {};
     var st = S.style, cards = S.a.concat(S.b), jobs = [];
     jobs.push([fontSpec(st.titleWeight, 40, S.fonts.title), cards.map(function (c) { return c.title; }).join('') + (st.centerText || '')]);
     jobs.push([fontSpec(st.textWeight, 40, S.fonts.body), cards.map(function (c) { return c.text; }).join('')]);
-    S.bgs.forEach(function (bg) { jobs.push([fontSpec(bg.bigWeight, 40, S.fonts.big), bg.bigText]); });
+    S.bgs.forEach(function (bg) { jobs.push([fontSpec(bg.bigWeight, 40, bg.bigFont), bg.bigText]); });
     var changed = false;
     return Promise.all(jobs.map(function (j) {
       var spec = j[0], text = j[1] || '가A';
@@ -92,15 +92,22 @@ window.CS = window.CS || {};
     return Promise.all(ps);
   };
   function getImg(id) { var r = id && images.get(id); return r && r.ready ? r.img : null; }
+  CS.getImg = getImg;
 
   /* 이미지를 영역에 꽉 차게(cover) 그리기. px/py: 0~100 위치, zoom: 100~ 확대 */
-  function drawCover(ctx, img, x, y, w, h, px, py, zoom) {
+  function coverGeom(img, w, h, zoom) {
     var iw = img.naturalWidth, ih = img.naturalHeight;
-    if (!iw || !ih) return;
+    if (!iw || !ih || !(w > 0) || !(h > 0)) return null;
     var z = Math.max(1, (zoom || 100) / 100), r = w / h, sw, sh;
     if (iw / ih > r) { sh = ih / z; sw = sh * r; } else { sw = iw / z; sh = sw / r; }
-    var sx = (iw - sw) * (px == null ? 50 : px) / 100, sy = (ih - sh) * (py == null ? 50 : py) / 100;
-    ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+    return { iw: iw, ih: ih, sw: sw, sh: sh };
+  }
+  CS.coverGeom = coverGeom;
+  function drawCover(ctx, img, x, y, w, h, px, py, zoom) {
+    var g = coverGeom(img, w, h, zoom);
+    if (!g) return;
+    var sx = (g.iw - g.sw) * (px == null ? 50 : px) / 100, sy = (g.ih - g.sh) * (py == null ? 50 : py) / 100;
+    ctx.drawImage(img, sx, sy, g.sw, g.sh, x, y, w, h);
   }
 
   /* ───────── 캐시 ───────── */
@@ -152,6 +159,13 @@ window.CS = window.CS || {};
       b: { x: W / 2 + st.gap / 2, y: cy - st.cardH / 2, w: st.cardW, h: st.cardH },
       cy: cy
     };
+  };
+
+  CS.cardImageArea = function (S, side) {
+    var st = S.style, R = CS.cardRects(S)[side];
+    if (st.textMode === 'overlay') return { x: R.x, y: R.y, w: R.w, h: R.h };
+    var inset = st.imgInset || 0, imgH = Math.round(R.h * st.imgRatio / 100);
+    return { x: R.x + inset, y: R.y + inset, w: R.w - inset * 2, h: imgH - inset };
   };
 
   /* ───────── 카드 한 장 그리기 (0,0 기준, 크기 w×h) ─────────
@@ -299,7 +313,7 @@ window.CS = window.CS || {};
       ctx.scale(scale, scale);
       ctx.globalAlpha = bg.bigOpacity / 100;
       ctx.fillStyle = bg.bigColor;
-      ctx.font = fontSpec(bg.bigWeight, bg.bigSize, S.fonts.big);
+      ctx.font = fontSpec(bg.bigWeight, bg.bigSize, bg.bigFont);
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if ('letterSpacing' in ctx) ctx.letterSpacing = (bg.bigSpacing || 0) + 'px';
       var lines = String(bg.bigText).split('\n'), lh = bg.bigSize * 0.98;
@@ -310,7 +324,7 @@ window.CS = window.CS || {};
   }
 
   function bgCanvas(S, bg, scale) {
-    var key = JSON.stringify([bg, S.fonts.big, scale, !!getImg(bg.img)]);
+    var key = JSON.stringify([bg, scale, !!getImg(bg.img)]);
     var hit = cacheGet(bgCache, key);
     if (hit) return hit;
     var c = makeCanvas(W * scale, H * scale);
